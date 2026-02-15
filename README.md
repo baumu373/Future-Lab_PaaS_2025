@@ -148,12 +148,4 @@ python3 \-m http.server 8000
 * **確認2**: Windowsファイアウォールでポート (8000, 8090, 8080\) が許可されていますか？  
 * **確認3**: netsh interface portproxy show all で、\<UbuntuIP\> が現在の正しいUbuntuのIPになっていますか？ (WSL再起動で変わることがあります)
 
-## **📚 ドキュメント**
 
-* 👉 [**引継ぎ資料 & 研究テーマ案 (handover\_material.md)**](https://www.google.com/search?q=./handover_material.md)  
-  * 開発・運用時の詳細なハマりポイント  
-  * 残された課題
-
-## **📜 ライセンス**
-
-This project is licensed under the MIT License \- see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.

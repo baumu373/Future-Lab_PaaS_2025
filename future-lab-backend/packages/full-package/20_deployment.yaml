@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-USER_ID_PLACEHOLDER
+  labels:
+    user-id: "USER_ID_PLACEHOLDER"
+    packageName: "full-package"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-USER_ID_PLACEHOLDER
+  template:
+    metadata:
+      labels:
+        app: app-USER_ID_PLACEHOLDER
+        user-id: "USER_ID_PLACEHOLDER"
+        packageName: "full-package"
+    spec:
+      initContainers:
+      - name: fix-minio-permissions
+        image: busybox:latest
+        command: ["sh", "-c", "chown -R 1001:1001 /data"]
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+      
+      # [修正] Alpine互換の "busybox:musl" を使用し、tar (busybox) もコピーする
+      - name: install-minio-tools
+        image: busybox:musl # [修正] glibcベースではなく、musl(alpine)ベースのbusybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Installing mc (MinIO Client) and tar (from busybox:musl)..."
+          wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /minio-tools/mc
+          chmod +x /minio-tools/mc
+          # busybox (tarを含む) をコピー
+          cp /bin/busybox /minio-tools/tar
+          chmod +x /minio-tools/tar
+          echo "MinIO tools install complete."
+        volumeMounts:
+        - name: minio-tools
+          mountPath: /minio-tools
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+
+      containers:
+      - name: analysis-container
+        image: baumu373/future-lab-interactive:1.2
+        ports:
+        - containerPort: 8888
+        volumeMounts:
+        - name: workspace-storage
+          mountPath: /workspace
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      - name: postgres-container
+        image: postgres:14-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "mysecretpassword"
+        - name: POSTGRES_USER
+          value: "user"
+        - name: POSTGRES_DB
+          value: "testdb"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      - name: minio-container
+        image: minio/minio:latest
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        
+        # [修正] 'apk add tar' のロジックを削除し、元のcommandに戻す
+        command:
+        - minio
+        - server
+        - /data
+        - --console-address
+        - :9001
+          
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minioadmin"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minioadmin"
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        - name: minio-tools # mc と tar (InitContainerから)
+          mountPath: /minio-tools
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+      - name: influxdb-container
+        image: influxdb:2.7
+        ports:
+        - containerPort: 8086
+        volumeMounts:
+        - name: influxdb-storage
+          mountPath: /var/lib/influxdb2
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "300m"
+            memory: "512Mi"
+      - name: grafana-container
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-postgres
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-minio
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-workspace
+      - name: influxdb-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-influxdb
+      - name: grafana-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-grafana
+      - name: minio-tools # mc と tar (InitContainerから)
+        emptyDir: {}

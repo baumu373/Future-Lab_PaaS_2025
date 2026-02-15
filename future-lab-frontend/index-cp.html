@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>未来実験室プラットフォーム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/keycloak-js@25.0.1/dist/keycloak.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .btn { padding: 0.75rem 1.25rem; border-radius: 0.5rem; font-weight: 500; text-align: center; transition: all 0.3s; cursor: pointer; border: none; }
+        .btn-primary { background-color: #06b6d4; color: white; }
+        .btn-primary:hover { background-color: #0891b2; }
+        .btn-danger { background-color: #dc2626; color: white; }
+        .btn-danger:hover { background-color: #b91c1c; }
+        .btn-secondary { background-color: #4b5563; color: white; }
+        .btn-secondary:hover { background-color: #374151; }
+        .btn-warning { background-color: #f59e0b; color: white; }
+        .btn-warning:hover { background-color: #d97706; }
+        .btn:disabled { background-color: #6b7280; cursor: not-allowed; }
+        .error-box { background-color: #fee2e2; color: #b91c1c; padding: 1rem; border-left: 4px solid #ef4444; margin-top: 1rem; border-radius: 0.5rem; }
+        #sqlResult table { width: 100%; border-collapse: collapse; }
+        #sqlResult th, #sqlResult td { border: 1px solid #4a5568; padding: 8px; text-align: left; }
+        #sqlResult th { background-color: #2d3748; }
+        .form-input {
+            background-color: #374151; /* bg-gray-700 */
+            border: 1px solid #4b5563; /* border-gray-600 */
+            color: white;
+            font-size: 0.875rem; /* text-sm */
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 0.625rem; /* p-2.5 */
+            width: 100%;
+            display: block;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #06b6d4; /* focus:border-cyan-500 */
+            box-shadow: 0 0 0 1px #06b6d4; /* focus:ring-cyan-500 */
+        }
+        /* [新規] 案1：公開設定チェックボックス用スタイル */
+        .form-checkbox {
+            appearance: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 1px solid #4b5563; /* border-gray-600 */
+            border-radius: 0.25rem; /* rounded */
+            background-color: #374151; /* bg-gray-700 */
+            display: inline-block;
+            vertical-align: middle;
+            cursor: pointer;
+            position: relative;
+        }
+        .form-checkbox:checked {
+            background-color: #06b6d4; /* bg-cyan-500 */
+            border-color: #0891b2; /* border-cyan-700 */
+        }
+        .form-checkbox:checked::after {
+            content: '✔';
+            color: white;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-start min-h-screen p-4 md:p-8 space-y-8">
+
+    <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-4xl">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-cyan-400">未来実験室プラットフォーム</h1>
+            <div id="user-info" class="hidden text-right">
+                <p class="text-gray-300">ようこそ、<span id="username" class="font-medium text-cyan-400"></span>さん</p>
+                <a href="#" id="logout-btn" class="text-sm text-gray-400 hover:text-white">ログアウト</a>
+            </div>
+        </div>
+        <p class="text-gray-400 mb-6">実験環境を選択してください。</p>
+        <div>
+            <label for="packageSelect" class="block mb-2 text-sm font-medium text-gray-300">実験環境パッケージ</label>
+            <!-- [修正] 認証完了まで無効化 -->
+            <select id="packageSelect" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-2.5" disabled>
+                <option value="full-package" selected>未来実験室フルパッケージ (全機能統合)</option>
+                <option value="interactive-analysis">インタラクティブ分析環境 (JupyterLab)</option>
+                <option value="real-time-monitoring">リアルタイム監視環境 (InfluxDB + Grafana)</option>
+                <option value="data-science-kit">データサイエンスキット (PostgreSQL + MinIO)</option>
+            </select>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+            <!-- [修正] 認証完了まで無効化 -->
+            <button id="startButton" class="btn btn-primary col-span-full sm:col-span-1" disabled>開始 / 更新</button>
+            <button id="stopButton" class="btn btn-secondary hidden">一時停止</button>
+            <button id="deleteButton" class="btn btn-danger hidden">完全削除</button>
+        </div>
+        <div id="connectionInfo" class="mt-6 p-4 bg-gray-900 rounded-lg text-gray-300 whitespace-pre-wrap font-mono text-sm min-h-[150px]">
+            接続情報がここに表示されます...
+        </div>
+        <div class="flex space-x-4">
+            <button id="jupyterButton" class="w-full mt-4 btn bg-orange-600 hover:bg-orange-700 hidden">JupyterLabを開く</button>
+            <button id="galleryButton" class="w-full mt-4 btn bg-purple-600 hover:bg-purple-700 hidden">パブリック・ギャラリーを見る</button>
+        </div>
+        <div id="sqlCockpit" class="mt-8 hidden">
+            <h2 class="text-2xl font-bold mb-4 text-cyan-400">SQL コックピット</h2>
+            <textarea id="sqlQuery" rows="4" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-2.5 font-mono" placeholder="SELECT version();"></textarea>
+            <button id="executeButton" class="w-full mt-4 btn bg-emerald-600 hover:bg-emerald-700">SQLを実行</button>
+            <div id="sqlResult" class="mt-6 p-4 bg-gray-900 rounded-lg min-h-[100px] text-gray-300 whitespace-pre-wrap font-mono text-sm overflow-x-auto">結果...</div>
+        </div>
+        
+        <!-- [修正] 案1：スナップショットパネル (公開チェックボックス追加) -->
+        <div id="snapshotPanel" class="mt-8 hidden">
+            <h2 class="text-2xl font-bold mb-4 text-cyan-400">環境スナップショット</h2>
+            <p class="text-gray-400 mb-4">現在の環境（全サービス：Jupyter, DB, ストレージ等）の状態を保存・復元します。</p>
+            
+            <!-- 作成パネル -->
+            <div class="mb-6 bg-gray-900 p-4 rounded-lg">
+                <label for="snapshotNameInput" class="block mb-2 text-sm font-medium text-gray-300">スナップショット名</label>
+                <input type="text" id="snapshotNameInput" class="form-input mb-4" placeholder="例: 2025-11-13 中間発表データ">
+                
+                <!-- [新規] 案1：公開設定チェックボックス -->
+                <div class="flex items-center mb-4">
+                    <input type="checkbox" id="snapshotIsPublicCheckbox" class="form-checkbox mr-2">
+                    <label for="snapshotIsPublicCheckbox" class="text-sm font-medium text-gray-300">全員に公開する (Public Snapshot)</label>
+                </div>
+                
+                <button id="snapshotCreateButton" class="w-full btn btn-warning">現在の環境のスナップショットを作成</button>
+                <p class="text-sm text-gray-500 mt-2">（注：作成には数分かかることがあり、その間環境は一時停止します）</p>
+            </div>
+            
+            <!-- 復元パネル -->
+            <div class="bg-gray-900 p-4 rounded-lg">
+                <label for="snapshotListSelect" class="block mb-2 text-sm font-medium text-gray-300">復元するスナップショット</label>
+                <div class="flex space-x-2">
+                    <select id="snapshotListSelect" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-2.5">
+                        <option value="">スナップショットを選択...</option>
+                    </select>
+                    <button id="snapshotRefreshButton" class="btn btn-secondary p-2.5">🔄</button>
+                </div>
+                <button id="snapshotRestoreButton" class="w-full mt-4 btn btn-danger">このスナップショットから環境を復元</button>
+                <p class="text-sm text-gray-500 mt-2">（**警告：** 現在の環境（全サービス）は上書きされます。復元には数分かかります。）</p>
+            </div>
+            <div id="snapshotResult" class="mt-6 p-4 bg-gray-900 rounded-lg min-h-[50px] text-gray-300 whitespace-pre-wrap font-mono text-sm">スナップショット操作の結果...</div>
+        </div>
+    </div>
+
+    <!-- 分析パネル (変更なし) -->
+    <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-4xl">
+        <h2 class="text-3xl font-bold text-cyan-400 mb-6">実験分析テンプレート</h2>
+        <div id="analysis-panel">
+            <h3 class="text-xl font-semibold mb-4">① 時系列データ可視化 & 異常検知</h3>
+            <p class="text-gray-400 mb-4">
+                時刻と測定値が含まれるCSVファイルをアップロードしてください。<br>
+                (1列目: 時刻, 2列目: 測定値)
+            </p>
+            <div class="flex items-center space-x-4">
+                <input type="file" id="csvFileInput" accept=".csv" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100"/>
+                <button id="analyzeButton" class="btn btn-primary whitespace-nowrap">分析を実行</button>
+            </div>
+
+            <div id="analysisResult" class="mt-6 min-h-[300px] bg-gray-900 rounded-lg p-4 flex items-center justify-center">
+                <p class="text-gray-500">分析結果がここに表示されます...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- [修正] 案1：スクリプト (DB対応) -->
+    <script>
+        // 1. Keycloakインスタンスの作成 (グローバル)
+        const keycloak = new Keycloak({
+            url: 'http://localhost:8080/',
+            realm: 'future-lab',
+            clientId: 'future-lab-frontend'
+        });
+
+        // 2. Element References (グローバルスコープで取得)
+        const userInfoDiv = document.getElementById('user-info');
+        const usernameSpan = document.getElementById('username');
+        const logoutBtn = document.getElementById('logout-btn');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const deleteButton = document.getElementById('deleteButton');
+        const jupyterButton = document.getElementById('jupyterButton');
+        const galleryButton = document.getElementById('galleryButton');
+        const connectionInfoDiv = document.getElementById('connectionInfo');
+        const packageSelect = document.getElementById('packageSelect');
+        const sqlCockpit = document.getElementById('sqlCockpit');
+        const sqlQueryTextarea = document.getElementById('sqlQuery');
+        const executeButton = document.getElementById('executeButton');
+        const sqlResultDiv = document.getElementById('sqlResult');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const csvFileInput = document.getElementById('csvFileInput');
+        const analysisResultDiv = document.getElementById('analysisResult');
+
+        // スナップショット用Element
+        const snapshotPanel = document.getElementById('snapshotPanel');
+        const snapshotNameInput = document.getElementById('snapshotNameInput');
+        const snapshotIsPublicCheckbox = document.getElementById('snapshotIsPublicCheckbox'); // [新規]
+        const snapshotCreateButton = document.getElementById('snapshotCreateButton');
+        const snapshotListSelect = document.getElementById('snapshotListSelect');
+        const snapshotRefreshButton = document.getElementById('snapshotRefreshButton');
+        const snapshotRestoreButton = document.getElementById('snapshotRestoreButton');
+        const snapshotResultDiv = document.getElementById('snapshotResult');
+
+        let jupyterUrl = '';
+        let galleryUrl = '';
+        let myUserID = ''; // [新規] 自分のKeycloak Subject IDを保存
+
+        // 3. ヘルパー関数の定義
+        
+        // UIリセット関数 (変更なし)
+        function resetUIState() {
+            stopButton.classList.add('hidden');
+            deleteButton.classList.add('hidden');
+            jupyterButton.classList.add('hidden');
+            galleryButton.classList.add('hidden');
+            sqlCockpit.classList.add('hidden');
+            snapshotPanel.classList.add('hidden');
+        }
+
+        // API呼び出し関数 (JSON専用) (変更なし)
+        async function apiCall(endpoint, method, body) {
+            if (!keycloak.token) {
+                throw new Error("認証トークンがありません。Keycloakの認証が完了するまでお待ちください。");
+            }
+            const response = await fetch(`http://localhost:8090/${endpoint}`, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${keycloak.token}` 
+                },
+                body: body ? JSON.stringify(body) : null
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || `サーバーエラー (${response.status})`);
+            }
+            return data;
+        }
+
+        // [修正] 案1：スナップショット一覧読み込み関数 (DB対応)
+        async function loadSnapshots() {
+            try {
+                // APIは DBから 'name', 'displayName', 'ownerUserID', 'isPublic', 'lastModified' を返す
+                const snapshots = await apiCall('snapshot/list', 'GET');
+                snapshotListSelect.innerHTML = '<option value="">スナップショットを選択...</option>';
+                
+                if (snapshots && snapshots.length > 0) {
+                    // (ソートはDB側 (created_at DESC) で実行済み)
+                    
+                    snapshots.forEach(snapshot => {
+                        const option = document.createElement('option');
+                        option.value = snapshot.name; // "safeName" (例: "my-snapshot-12345")
+                        
+                        let ownerLabel = '';
+                        if (snapshot.ownerUserID === myUserID) {
+                            ownerLabel = '(自分)';
+                        } else if (snapshot.isPublic) {
+                            ownerLabel = '(公開)';
+                        } else {
+                            // (通常ここには来ないはず)
+                            ownerLabel = '(他)';
+                        }
+                        
+                        const displayName = snapshot.displayName || snapshot.name;
+                        option.textContent = `${displayName} ${ownerLabel} (${new Date(snapshot.lastModified).toLocaleString()})`;
+                        snapshotListSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                 snapshotResultDiv.innerHTML = `<div class="error-box">❌ スナップショット一覧の読込失敗: ${error.message}</div>`;
+            }
+        }
+
+        // 4. すべてのイベントリスナーを登録 (グローバルスコープ)
+        
+        // startButton, stopButton, deleteButton, executeButton は変更なし
+        startButton.addEventListener('click', async () => {
+            connectionInfoDiv.textContent = '実験環境を起動中...';
+            startButton.disabled = true;
+            resetUIState();
+            try {
+                const data = await apiCall('start-experiment', 'POST', { packageName: packageSelect.value });
+                let infoText = `✅ 成功！ 環境の準備ができました。\n\n`;
+                const ports = data.servicePorts || {};
+                const publicPorts = data.publicServicePorts || {};
+                if (ports.postgres) { infoText += `--- PostgreSQL ---\nHost: localhost\nPort: ${ports.postgres}\n\n`; sqlCockpit.classList.remove('hidden'); }
+                if (ports['minio-ui']) { infoText += `--- プライベートストレージ (MinIO) ---\nWeb UI: http://localhost:${ports['minio-ui']}\n\n`; }
+                if (ports.jupyter) { infoText += `--- JupyterLab ---\n下のボタンからアクセスしてください。\n`; jupyterUrl = `http://localhost:${ports.jupyter}`; jupyterButton.classList.remove('hidden'); }
+                if (ports.influxdb) { infoText += `--- InfluxDB ---\nWeb UI & API: http://localhost:${ports.influxdb}\n\n`; }
+                if (ports.grafana) { infoText += `--- Grafana ---\nDashboard: http://localhost:${ports.grafana}\n\n`; }
+                if (publicPorts.console) { infoText += `--- パブリック・ギャラリー ---\n`; galleryUrl = `http://localhost:${publicPorts.console}`; galleryButton.classList.remove('hidden'); }
+                connectionInfoDiv.textContent = infoText;
+                stopButton.classList.remove('hidden');
+                deleteButton.classList.remove('hidden');
+                snapshotPanel.classList.remove('hidden');
+                snapshotResultDiv.textContent = "スナップショット操作の結果...";
+                loadSnapshots(); 
+
+            } catch (error) {
+                connectionInfoDiv.innerHTML = `<div class="error-box">❌ エラー: ${error.message}</div>`;
+            } finally {
+                startButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', async () => {
+             if (!confirm(`環境を一時停止しますか？`)) return;
+             try {
+                await apiCall('stop-experiment', 'POST', {});
+                connectionInfoDiv.textContent = `✅ 成功！\n環境は一時停止されました。`;
+                resetUIState();
+             } catch (error) {
+                connectionInfoDiv.innerHTML = `<div class="error-box">❌ 停止エラー: ${error.message}</div>`;
+             }
+        });
+
+        deleteButton.addEventListener('click', async () => {
+             if (!confirm(`本当に環境とデータを完全に削除しますか？\n(注: DBに登録されたスナップショット情報も削除されます)`)) return;
+             try {
+                await apiCall('delete-experiment', 'DELETE', {});
+                connectionInfoDiv.textContent = `✅ 成功！\n環境とデータは完全に削除されました。`;
+                resetUIState();
+             } catch (error) {
+                connectionInfoDiv.innerHTML = `<div class="error-box">❌ 削除エラー: ${error.message}</div>`;
+             }
+        });
+
+        executeButton.addEventListener('click', async () => {
+            const sqlQuery = sqlQueryTextarea.value;
+            if (!sqlQuery) { sqlResultDiv.textContent = 'SQLクエリを入力してください。'; return; }
+            sqlResultDiv.textContent = '実行中...';
+            executeButton.disabled = true;
+            try {
+                const data = await apiCall('execute-sql', 'POST', { sqlQuery: sqlQuery });
+                if (data.headers && data.rows && data.rows.length > 0) {
+                    let tableHTML = '<table><thead><tr>';
+                    data.headers.forEach(header => tableHTML += `<th>${header}</th>`);
+                    tableHTML += '</tr></thead><tbody>';
+                    data.rows.forEach(row => {
+                        tableHTML += '<tr>';
+                        row.forEach(cell => { tableHTML += `<td>${cell === null ? 'NULL' : cell}</td>`; });
+                        tableHTML += '</tr>';
+                    });
+                    tableHTML += '</tbody></table>';
+                    sqlResultDiv.innerHTML = tableHTML;
+                } else {
+                    sqlResultDiv.textContent = `✅ ${data.message || 'クエリは正常に実行されました。（結果セットなし）'}`;
+                }
+            } catch (error) {
+                sqlResultDiv.textContent = `❌ エラー: ${error.message}`;
+            } finally {
+                executeButton.disabled = false;
+            }
+        });
+
+        // analyzeButton (変更なし)
+        analyzeButton.addEventListener('click', async () => {
+            const file = csvFileInput.files[0];
+            if (!file) {
+                analysisResultDiv.innerHTML = '<p class="text-red-400">ファイルが選択されていません。</p>';
+                return;
+            }
+            if (!keycloak.token) {
+                analysisResultDiv.innerHTML = '<p class="text-red-400">❌ 認証トークンがありません。Keycloakの認証が完了するまでお待ちください。</p>';
+                return;
+            }
+            analysisResultDiv.innerHTML = '<p class="text-cyan-400">分析中... (完了まで1〜2分かかることがあります)</p>';
+            analyzeButton.disabled = true;
+            const formData = new FormData();
+            formData.append('csvfile', file);
+            try {
+                const response = await fetch('http://localhost:8090/analyze', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${keycloak.token}` },
+                    body: formData
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `サーバーエラー (${response.status})`);
+                }
+                const imageBlob = await response.blob();
+                const imageUrl = URL.createObjectURL(imageBlob);
+                analysisResultDiv.innerHTML = `<img src="${imageUrl}" alt="分析結果グラフ" class="max-w-full h-auto rounded-lg" />`;
+            } catch (error) {
+                analysisResultDiv.innerHTML = `<p class="text-red-400">❌ エラー: ${error.message}</p>`;
+            } finally {
+                analyzeButton.disabled = false;
+            }
+        });
+
+        jupyterButton.addEventListener('click', () => { if (jupyterUrl) window.open(jupyterUrl, '_blank'); });
+        galleryButton.addEventListener('click', () => { if (galleryUrl) window.open(galleryUrl, '_blank'); });
+
+        // スナップショット用イベントリスナー (変更なし)
+        snapshotRefreshButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            snapshotResultDiv.textContent = "スナップショット一覧を更新中...";
+            loadSnapshots();
+        });
+
+        // [修正] 案1：snapshotCreateButton (isPublic を送信)
+        snapshotCreateButton.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const snapshotName = snapshotNameInput.value;
+            const isPublic = snapshotIsPublicCheckbox.checked; // [新規]
+            
+            if (!snapshotName) {
+                snapshotResultDiv.innerHTML = `<div class="error-box">❌ スナップショット名を入力してください。</div>`;
+                return;
+            }
+            
+            let confirmMessage = `現在の環境のスナップショット「${snapshotName}」を作成しますか？\n`;
+            confirmMessage += isPublic ? "（設定：全員に公開）\n" : "（設定：自分のみ）\n";
+            confirmMessage += "（環境が数分間停止します）";
+            
+            if (!confirm(confirmMessage)) return;
+            
+            snapshotResultDiv.textContent = `スナップショット「${snapshotName}」を作成中...（数分かかります）`;
+            snapshotCreateButton.disabled = true;
+            try {
+                // [修正] APIに isPublic を渡す
+                const data = await apiCall('snapshot/create', 'POST', { 
+                    snapshotName: snapshotName,
+                    isPublic: isPublic
+                }); 
+                snapshotResultDiv.textContent = `✅ 成功: ${data.message}`;
+                loadSnapshots(); 
+                snapshotNameInput.value = ""; 
+                snapshotIsPublicCheckbox.checked = false;
+            } catch (error) {
+                snapshotResultDiv.innerHTML = `<div class="error-box">❌ 作成失敗: ${error.message}</div>`;
+            } finally {
+                snapshotCreateButton.disabled = false;
+            }
+        });
+
+        // [修正] 案1：snapshotRestoreButton (表示名解決ロジック変更なし)
+        snapshotRestoreButton.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const snapshotName = snapshotListSelect.value; // "safeName"
+            if (!snapshotName) {
+                snapshotResultDiv.textContent = "復元するスナップショットを選択してください。";
+                return;
+            }
+            
+            const selectedTextWithDate = snapshotListSelect.options[snapshotListSelect.selectedIndex].text;
+            // [修正] (公開) や (自分) と日付を両方削除
+            const selectedText = selectedTextWithDate.replace(/\s\(.*\)$/, '');
+
+            if (!confirm(`本当にスナップショット「${selectedTextWithDate}」から環境を復元しますか？\n（**警告：** 現在の環境（全サービス）は上書きされます！）`)) return;
+            
+            snapshotResultDiv.textContent = `スナップショット「${selectedTextWithDate}」から復元中...（数分かかります）`;
+            snapshotRestoreButton.disabled = true;
+            try {
+                await apiCall('snapshot/restore', 'POST', { snapshotName: snapshotName });
+                snapshotResultDiv.textContent = `✅ 成功: スナップショット「${selectedText}」が正常に復元されました。`;
+            } catch (error) {
+                snapshotResultDiv.innerHTML = `<div class="error-box">❌ 復元失敗: ${error.message}</div>`;
+            } finally {
+                snapshotRestoreButton.disabled = false;
+            }
+        });
+
+        
+        // 5. [修正] Keycloak認証 (UIの有効化/無効化と、catchブロックの修正)
+        async function main() {
+            try {
+                // 認証開始 (リダイレクトが発生する可能性がある)
+                const authenticated = await keycloak.init({ onLoad: 'login-required' });
+                
+                if (authenticated) {
+                    // --- 認証成功 ---
+                    userInfoDiv.classList.remove('hidden');
+                    usernameSpan.textContent = keycloak.tokenParsed.preferred_username;
+                    logoutBtn.addEventListener('click', () => keycloak.logout({ redirectUri: window.location.href }));
+                    
+                    myUserID = sanitize(keycloak.tokenParsed.sub);
+                    
+                    // [修正] 認証が成功したので、UIの操作を有効化する
+                    packageSelect.disabled = false;
+                    startButton.disabled = false;
+                    
+                } else {
+                    // --- 認証失敗 (リダイレクトがブロックされた等) ---
+                    document.body.innerHTML = '<h1>Keycloak認証に失敗しました。</h1><p>ブラウザでポップアップやリダイレクトがブロックされていないか確認し、ページを再読み込みしてください。</p>';
+                }
+            } catch (error) {
+                // --- Keycloakサーバー自体への接続失敗 ---
+                console.error("Keycloak initialization failed:", error);
+                // [修正] catchブロックのエラーメッセージを修正
+                document.body.innerHTML = '<h1>Keycloakに接続できませんでした。</h1><p>Keycloakサーバー (docker-compose.yml) が起動しているか確認してください。</p><p><pre>' + error.message + '</pre></p>';
+            }
+        }
+        
+        function sanitize(userID) {
+            let sanitized = userID.toLowerCase();
+            sanitized = sanitized.replace(/[^a-z0-9-]/g, '-');
+            if (sanitized.length > 40) {
+                sanitized = sanitized.substring(0, 40);
+            }
+            return sanitized;
+        }
+
+
+        // 6. 最後に main() を実行
+        main();
+    </script>
+</body>
+</html>

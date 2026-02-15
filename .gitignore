@@ -1,0 +1,13 @@
+ # Go build artifacts
+    *.exe
+    *.exe~
+    *.dll
+    *.so
+    *.a
+
+    # Editor backup files (like main.go~)
+    *~
+
+    # IDE/Editor specific files
+    .vscode/
+    .idea/

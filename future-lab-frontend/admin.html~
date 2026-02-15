@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>管理者ダッシュボード</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/keycloak-js@25.0.1/dist/keycloak.js"></script>
+    <style>
+        body { font-family: sans-serif; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+        th, td { border: 1px solid #4a5568; padding: 8px; text-align: left; vertical-align: top; }
+        th { background-color: #2d3748; }
+        /* [修正] ボタンのスタイルを統一 */
+        .btn { 
+            padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; 
+            color: white; 
+            cursor: pointer; 
+            border: none; 
+            margin-right: 0.5rem; 
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+        }
+        .btn-yellow { background-color: #d97706; }
+        .btn-yellow:hover { background-color: #b45309; }
+        .btn-red { background-color: #dc2626; }
+        .btn-red:hover { background-color: #b91c1c; }
+        .btn-blue { background-color: #2563eb; }
+        .btn-blue:hover { background-color: #1d4ed8; }
+        td { word-break: break-all; } /* [新規] 長いIDがテーブルを壊さないように */
+    </style>
+</head>
+<body class="bg-gray-900 text-white p-8">
+    
+    <div class="flex justify-between items-start">
+        <h1 class="text-3xl font-bold text-cyan-400 mb-4">管理者ダッシュボード</h1>
+        <div id="user-info" class="hidden text-right">
+            <p class="text-gray-300">ようこそ、<span id="username" class="font-bold text-cyan-400"></span>さん</p>
+            <a href="#" id="logout-btn" class="text-sm text-gray-400 hover:text-white">ログアウト</a>
+        </div>
+    </div>
+
+    <div id="status">Keycloakと接続中...</div>
+
+    <div id="admin-panel" class="hidden">
+        <div class="mb-4">
+            <button id="refreshButton" class="btn btn-blue">全データ更新</button>
+        </div>
+
+        <h2 class="text-2xl font-bold mt-6 mb-4">稼働中の実験環境一覧</h2>
+        <div id="experiments-list" class="overflow-x-auto">
+            <p class="text-gray-400">データを読み込み中...</p>
+        </div>
+
+        <!-- [新規] 全スナップショット一覧 -->
+        <h2 class="text-2xl font-bold mt-8 mb-4">全スナップショット一覧 (DB)</h2>
+        <div id="snapshots-list" class="overflow-x-auto">
+            <p class="text-gray-400">データを読み込み中...</p>
+        </div>
+    </div>
+
+    <script>
+        const keycloak = new Keycloak({
+            url: 'http://localhost:8080/',
+            realm: 'future-lab',
+            clientId: 'future-lab-frontend'
+        });
+
+        // [新規] Element References
+        const statusDiv = document.getElementById('status');
+        const adminPanel = document.getElementById('admin-panel');
+        const userInfoDiv = document.getElementById('user-info');
+        const usernameSpan = document.getElementById('username');
+        const logoutBtn = document.getElementById('logout-btn');
+        const refreshButton = document.getElementById('refreshButton');
+        const experimentsListDiv = document.getElementById('experiments-list');
+        const snapshotsListDiv = document.getElementById('snapshots-list');
+
+        async function main() {
+            try {
+                const authenticated = await keycloak.init({ onLoad: 'login-required' });
+                if (authenticated) {
+                    // [修正] Keycloakのロールチェック (admin.htmlでは必須)
+                    if (!keycloak.hasRealmRole('admin')) {
+                        statusDiv.innerHTML = '<h1 class="text-red-400">アクセス拒否: 管理者権限 (adminロール) が必要です。</h1>';
+                        return;
+                    }
+                    setupUI();
+                    loadAllAdminData();
+                } else {
+                    // [新規] 認証に成功しなかった場合 (index.htmlと同様)
+                    statusDiv.innerHTML = '<h1>Keycloak認証に失敗しました。</h1><p>ブラウザでポップアップやリダイレクトがブロックされていないか確認し、ページを再読み込みしてください。</p>';
+                }
+            } catch (error) {
+                // [修正] Keycloakサーバー自体への接続失敗 (index.htmlと同様)
+                console.error("Keycloak initialization failed:", error);
+                statusDiv.innerHTML = '<h1>Keycloakに接続できませんでした。</h1><p>Keycloakサーバー (docker-compose.yml) が起動しているか確認してください。</p><p><pre>' + error.message + '</pre></p>';
+            }
+        }
+
+        function setupUI() {
+            statusDiv.style.display = 'none';
+            adminPanel.classList.remove('hidden');
+            userInfoDiv.classList.remove('hidden');
+            usernameSpan.textContent = keycloak.tokenParsed.preferred_username;
+            logoutBtn.addEventListener('click', () => keycloak.logout());
+            refreshButton.addEventListener('click', loadAllAdminData);
+        }
+
+        // [新規] 2つのリストを両方読み込む
+        function loadAllAdminData() {
+            loadAdminExperiments();
+            loadAdminSnapshots();
+        }
+
+        // [修正] API呼び出し共通関数 (GETリクエストでbodyを渡さないように修正)
+        async function adminApiCall(endpoint, method, body) {
+            
+            // [修正] fetchのオプションを動的に構築
+            const fetchOptions = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${keycloak.token}`
+                }
+            };
+
+            // [修正] bodyが存在する場合 (POST, DELETEなど) のみ、bodyプロパティを追加
+            if (body) {
+                fetchOptions.body = JSON.stringify(body);
+            }
+            
+            // [修正] GET/HEAD リクエストで body が "null" にならないように修正
+            const response = await fetch(`http://localhost:8090/admin/${endpoint}`, fetchOptions);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || `サーバーエラー (${response.status})`);
+            }
+            return await response.json();
+        }
+
+        // [修正] 稼働環境リストの読み込み
+        async function loadAdminExperiments() {
+            experimentsListDiv.innerHTML = '<p class="text-gray-400">稼働環境リストを読み込み中...</p>';
+            try {
+                const experiments = await adminApiCall('experiments', 'GET', null);
+
+                if (!experiments || experiments.length === 0) {
+                    experimentsListDiv.innerHTML = '<p class="text-gray-400">現在、稼働中の実験環境はありません。</p>';
+                    return;
+                }
+                
+                let tableHTML = '<table><thead><tr><th>所有ユーザーID</th><th>パッケージ名</th><th>Namespace</th><th>作成日時</th><th>操作</th></tr></thead><tbody>';
+                experiments.forEach(exp => {
+                    const buttons = exp.userId ? `
+                        <button class="btn btn-yellow" onclick="forceStop('${exp.userId}')">強制停止</button>
+                        <button class="btn btn-red" onclick="forceDelete('${exp.userId}')">強制削除</button>
+                    ` : 'N/A';
+                    
+                    tableHTML += `
+                        <tr>
+                            <td>${exp.userId || 'N/A'}</td>
+                            <td>${exp.packageName || 'N/A'}</td>
+                            <td>${exp.namespace || 'N/A'}</td>
+                            <td>${new Date(exp.creationTimestamp).toLocaleString()}</td>
+                            <td>${buttons}</td>
+                        </tr>
+                    `;
+                });
+                tableHTML += '</tbody></table>';
+                experimentsListDiv.innerHTML = tableHTML;
+            } catch (error) {
+                experimentsListDiv.innerHTML = `<p class="text-red-400">エラー: ${error.message}</p>`;
+            }
+        }
+
+        // [新規] 全スナップショットリストの読み込み
+        async function loadAdminSnapshots() {
+            snapshotsListDiv.innerHTML = '<p class="text-gray-400">全スナップショットリストを読み込み中...</p>';
+            try {
+                const snapshots = await adminApiCall('snapshots/list', 'GET', null);
+
+                if (!snapshots || snapshots.length === 0) {
+                    snapshotsListDiv.innerHTML = '<p class="text-gray-400">現在、DBにスナップショットはありません。</p>';
+                    return;
+                }
+                
+                let tableHTML = '<table><thead><tr><th>表示名</th><th>所有ユーザーID</th><th>公開設定</th><th>作成日時</th><th>内部名 (safeName)</th><th>操作</th></tr></thead><tbody>';
+                snapshots.forEach(snap => {
+                    const visibility = snap.isPublic ? '<span class="text-cyan-400">公開</span>' : '<span class="text-gray-500">非公開</span>';
+                    
+                    // [注意] JSのconfirmで特殊文字をエスケープするために、\n を \\n に、' を \' に変換
+                    const escapedDisplayName = snap.displayName.replace(/\n/g, '\\n').replace(/'/g, "\\'");
+                    
+                    const deleteButton = `
+                        <button class="btn btn-red" onclick="forceDeleteSnapshot('${snap.name}', '${snap.ownerUserID}', '${escapedDisplayName}')">
+                            完全削除
+                        </button>
+                    `;
+                    
+                    tableHTML += `
+                        <tr>
+                            <td>${snap.displayName}</td>
+                            <td>${snap.ownerUserID}</td>
+                            <td>${visibility}</td>
+                            <td>${new Date(snap.lastModified).toLocaleString()}</td>
+                            <td>${snap.name}</td>
+                            <td>${deleteButton}</td>
+                        </tr>
+                    `;
+                });
+                tableHTML += '</tbody></table>';
+                snapshotsListDiv.innerHTML = tableHTML;
+            } catch (error) {
+                snapshotsListDiv.innerHTML = `<p class="text-red-400">エラー: ${error.message}</p>`;
+            }
+        }
+
+        // [修正] 強制停止 (変更なし)
+        async function forceStop(userId) {
+            if (!confirm(`ユーザーID: ${userId} の環境を強制的に一時停止しますか？`)) return;
+            try {
+                const result = await adminApiCall('stop-experiment', 'POST', { userId: userId });
+                alert(`成功: ${result.message}`);
+                loadAdminExperiments(); // 環境リストのみ再読み込み
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        // [修正] 強制削除 (変更なし)
+        async function forceDelete(userId) {
+            if (!confirm(`本当にユーザーID: ${userId} の環境とデータを完全に削除しますか？\n(DB内のスナップショットメタデータも削除されます)\nこの操作は元に戻せません。`)) return;
+            try {
+                const result = await adminApiCall('delete-experiment', 'DELETE', { userId: userId });
+                alert(`成功: ${result.message}`);
+                loadAllAdminData(); // 両方のリストを再読み込み
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        // [新規] スナップショット完全削除
+        async function forceDeleteSnapshot(safeName, ownerUserID, displayName) {
+            if (!confirm(`本当にスナップショット「${displayName}」を完全に削除しますか？\n\n所有者: ${ownerUserID}\n内部名: ${safeName}\n\nDBメタデータとMinIOの実ファイルが両方削除されます。\nこの操作は元に戻せません。`)) return;
+            try {
+                const result = await adminApiCall('snapshots/delete', 'DELETE', { 
+                    safeName: safeName,
+                    ownerUserID: ownerUserID 
+                });
+                alert(`成功: ${result.message}`);
+                loadAdminSnapshots(); // スナップショットリストのみ再読み込み
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>

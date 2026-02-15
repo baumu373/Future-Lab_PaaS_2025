@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-USER_ID_PLACEHOLDER-workspace
+  labels:
+    user-id: USER_ID_PLACEHOLDER
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  resources: { requests: { storage: "5Gi" } }

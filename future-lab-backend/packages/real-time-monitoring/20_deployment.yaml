@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-USER_ID_PLACEHOLDER
+  labels:
+    user-id: USER_ID_PLACEHOLDER
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-USER_ID_PLACEHOLDER
+  template:
+    metadata:
+      labels:
+        app: app-USER_ID_PLACEHOLDER
+        user-id: USER_ID_PLACEHOLDER
+    spec:
+      volumes:
+      - name: influxdb-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-influxdb
+      - name: grafana-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-grafana
+      containers:
+      - name: influxdb-container
+        image: influxdb:2.7
+        ports:
+        - containerPort: 8086
+        volumeMounts:
+        - name: influxdb-storage
+          mountPath: /var/lib/influxdb2
+      - name: grafana-container
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+

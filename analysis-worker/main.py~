@@ -1,0 +1,51 @@
+import os
+import sys
+import pandas as pd
+import matplotlib.pyplot as plt
+
+def main():
+    # コマンドライン引数から入力ファイルと出力先のパスを取得
+    # 例: python main.py /data/input.csv /data/output.png
+    if len(sys.argv) != 3:
+        print("Usage: python main.py <input_csv_path> <output_image_path>")
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
+
+    # 入力ファイルが存在するかチェック
+    if not os.path.exists(input_path):
+        print(f"Error: Input file not found at {input_path}")
+        sys.exit(1)
+
+    print(f"Reading data from {input_path}...")
+    try:
+        # CSVファイルを読み込む
+        # 最初の列をインデックス(X軸)、2番目の列を値(Y軸)として使用
+        df = pd.read_csv(input_path, index_col=0, header=0, parse_dates=True)
+        
+        # プロットするデータ列を選択 (2番目の列)
+        series_to_plot = df.iloc[:, 0]
+
+        print("Generating plot...")
+        # グラフの作成
+        fig, ax = plt.subplots(figsize=(12, 6))
+        series_to_plot.plot(ax=ax)
+        
+        # グラフの装飾
+        ax.set_title('Time Series Data Visualization', fontsize=16)
+        ax.set_xlabel('Time', fontsize=12)
+        ax.set_ylabel(series_to_plot.name, fontsize=12)
+        ax.grid(True)
+        plt.tight_layout()
+
+        # グラフを画像ファイルとして保存
+        plt.savefig(output_path)
+        print(f"Plot saved to {output_path}")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

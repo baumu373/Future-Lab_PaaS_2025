@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-USER_ID_PLACEHOLDER
+  labels:
+    user-id: USER_ID_PLACEHOLDER
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-USER_ID_PLACEHOLDER
+  template:
+    metadata:
+      labels:
+        app: app-USER_ID_PLACEHOLDER
+        user-id: USER_ID_PLACEHOLDER
+    spec:
+      initContainers:
+      - name: fix-minio-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 1001:1001 /data"]
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        securityContext:
+          runAsUser: 0
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-postgres
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: pvc-USER_ID_PLACEHOLDER-minio
+      containers:
+      - name: analysis-container
+        image: baumu373/future-lab-image:1.0
+        command: ["sleep", "infinity"]
+      - name: postgres-container
+        image: postgres:14-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - { name: POSTGRES_PASSWORD, value: "mysecretpassword" }
+        - { name: POSTGRES_USER, value: "user" }
+        - { name: POSTGRES_DB, value: "testdb" }
+        volumeMounts:
+        - { name: postgres-storage, mountPath: /var/lib/postgresql/data }
+      - name: minio-container
+        image: minio/minio:latest
+        command: ["minio", "server", "/data", "--console-address", ":9001"] # ★ここを修正！
+        ports:
+        - { containerPort: 9000 }
+        - { containerPort: 9001 }
+        env:
+        - { name: MINIO_ROOT_USER, value: "minioadmin" }
+        - { name: MINIO_ROOT_PASSWORD, value: "minioadmin" }
+        volumeMounts:
+        - { name: minio-storage, mountPath: /data }
+        securityContext:
+          runAsUser: 1001
+          runAsGroup: 1001

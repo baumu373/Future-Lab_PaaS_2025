@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>管理者ダッシュボード</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/keycloak-js@25.0.1/dist/keycloak.js"></script>
+    <script src="config.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { border: 1px solid #4a5568; padding: 10px; text-align: left; }
+        th { background-color: #374151; }
+        .btn { padding: 0.5rem 1rem; border-radius: 0.375rem; color: white; cursor: pointer; border: none; margin-right: 0.5rem; font-weight: 500; }
+        .btn-blue { background-color: #2563eb; }
+        .btn-blue:hover { background-color: #1d4ed8; }
+        .btn-yellow { background-color: #d97706; }
+        .btn-yellow:hover { background-color: #b45309; }
+        .btn-red { background-color: #dc2626; }
+        .btn-red:hover { background-color: #b91c1c; }
+        .btn:disabled { background-color: #6b7280; cursor: not-allowed; }
+        .text-xs { font-size: 0.75rem; }
+        .font-mono { font-family: monospace; }
+        .text-green-400 { color: #4ade80; }
+        .text-gray-400 { color: #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white p-4 md:p-8">
+
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold text-cyan-400">管理者ダッシュボード</h1>
+        <div id="user-info" class="hidden text-right">
+            <p class="text-gray-300">ようこそ、<span id="username" class="font-medium text-cyan-400"></span>さん</p>
+            <a href="#" id="logout-btn" class="text-sm text-gray-400 hover:text-white">ログアウト</a>
+        </div>
+    </div>
+    
+    <div id="status">Keycloakと接続中...</div>
+    
+    <div id="admin-panel" class="hidden space-y-8">
+        <button id="refreshButton" class="btn btn-blue">全データ更新</button>
+        
+        <div>
+            <h2 class="text-2xl font-bold">稼働中の実験環境一覧</h2>
+            <div id="experiments-list" class="overflow-x-auto">
+                <p class="text-gray-400">データを読み込み中...</p>
+            </div>
+        </div>
+
+        <div>
+            <h2 class="text-2xl font-bold">全スナップショット一覧 (DB)</h2>
+            <div id="snapshots-list" class="overflow-x-auto">
+                <p class="text-gray-400">データを読み込み中...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // [修正] config.js の設定値を使用するように変更
+        const keycloak = new Keycloak({
+            url: CONFIG.KEYCLOAK_URL,
+            realm: CONFIG.KEYCLOAK_REALM,
+            clientId: CONFIG.KEYCLOAK_CLIENT_ID
+        });
+
+        // Element References
+        const statusDiv = document.getElementById('status');
+        const adminPanel = document.getElementById('admin-panel');
+        const userInfoDiv = document.getElementById('user-info');
+        const usernameSpan = document.getElementById('username');
+        const logoutBtn = document.getElementById('logout-btn');
+        const refreshButton = document.getElementById('refreshButton');
+        const experimentsListDiv = document.getElementById('experiments-list');
+        const snapshotsListDiv = document.getElementById('snapshots-list');
+
+        async function main() {
+            try {
+                // Keycloak初期化
+                const authenticated = await keycloak.init({ 
+                    onLoad: 'login-required',
+                    // [重要] スマホなどの外部接続時にクッキーの問題を回避するため、
+                    // checkLoginIframe: false を設定することをお勧めします
+                    checkLoginIframe: false 
+                });
+                
+                if (authenticated) {
+                    if (!keycloak.hasRealmRole('admin')) {
+                        statusDiv.innerHTML = '<h1 class="text-red-400">アクセス拒否: 管理者権限 (adminロール) が必要です。</h1>';
+                        return;
+                    }
+                    setupUI();
+                    loadAllAdminData();
+                } else {
+                    statusDiv.innerHTML = '<h1>Keycloak認証に失敗しました。</h1><p>ブラウザでポップアップやリダイレクトがブロックされていないか確認し、ページを再読み込みしてください。</p>';
+                }
+            } catch (error) {
+                console.error("Keycloak initialization failed:", error);
+                statusDiv.innerHTML = `<h1>Keycloakに接続できませんでした。</h1>
+                                       <p>設定されたURL: <strong>${CONFIG.KEYCLOAK_URL}</strong></p>
+                                       <p>PCのIPアドレスが正しいか、config.jsを確認してください。</p>
+                                       <p><pre>${error.message}</pre></p>`;
+            }
+        }
+
+        function setupUI() {
+            statusDiv.style.display = 'none';
+            adminPanel.classList.remove('hidden');
+            userInfoDiv.classList.remove('hidden');
+            usernameSpan.textContent = keycloak.tokenParsed.preferred_username;
+            logoutBtn.addEventListener('click', () => keycloak.logout());
+            refreshButton.addEventListener('click', loadAllAdminData);
+        }
+
+        function loadAllAdminData() {
+            loadAdminExperiments();
+            loadAdminSnapshots();
+        }
+
+        // [修正] API呼び出し共通関数 (CONFIG.API_BASE_URL を使用)
+        async function adminApiCall(endpoint, method, body) {
+            const fetchOptions = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${keycloak.token}`
+                }
+            };
+            if (body) {
+                fetchOptions.body = JSON.stringify(body);
+            }
+            
+            // [変更点] localhost ではなく config.js のURLを使用
+            const response = await fetch(`${CONFIG.API_BASE_URL}/admin/${endpoint}`, fetchOptions);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || `サーバーエラー (${response.status})`);
+            }
+            
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                return await response.json();
+            } else {
+                return { status: "success", message: "Operation successful (no content)" };
+            }
+        }
+
+        // 稼働中の環境一覧
+        async function loadAdminExperiments() {
+            experimentsListDiv.innerHTML = '<p class="text-gray-400">稼働中の環境を読み込み中...</p>';
+            try {
+                const experiments = await adminApiCall('experiments', 'GET', null);
+                if (!experiments || experiments.length === 0) {
+                    experimentsListDiv.innerHTML = '<p class="text-gray-400">現在、稼働中の実験環境はありません。</p>';
+                    return;
+                }
+                
+                let tableHTML = '<table><thead><tr><th>所有ユーザーID</th><th>パッケージ名</th><th>Namespace</th><th>作成日時</th><th>操作</th></tr></thead><tbody>';
+                experiments.forEach(exp => {
+                    const buttons = exp.userId ? `
+                        <button class="btn btn-yellow" onclick="forceStop('${exp.userId}')">強制停止</button>
+                        <button class="btn btn-red" onclick="forceDelete('${exp.userId}')">強制削除</button>
+                    ` : 'N/A';
+                    
+                    tableHTML += `
+                        <tr>
+                            <td class="text-xs font-mono">${exp.userId || 'N/A'}</td>
+                            <td>${exp.packageName || 'N/A'}</td>
+                            <td>${exp.namespace || 'N/A'}</td>
+                            <td>${new Date(exp.creationTimestamp).toLocaleString()}</td>
+                            <td>${buttons}</td>
+                        </tr>
+                    `;
+                });
+                tableHTML += '</tbody></table>';
+                experimentsListDiv.innerHTML = tableHTML;
+            } catch (error) {
+                experimentsListDiv.innerHTML = `<p class="text-red-400">エラー: ${error.message}</p>`;
+            }
+        }
+
+        // 全スナップショット一覧
+        async function loadAdminSnapshots() {
+            snapshotsListDiv.innerHTML = '<p class="text-gray-400">全スナップショットを読み込み中...</p>';
+            try {
+                const snapshots = await adminApiCall('snapshots/list', 'GET', null);
+                if (!snapshots || snapshots.length === 0) {
+                    snapshotsListDiv.innerHTML = '<p class="text-gray-400">DBにスナップショットはありません。</p>';
+                    return;
+                }
+
+                let tableHTML = '<table><thead><tr>' +
+                    '<th>表示名</th>' +
+                    '<th>所有ユーザー名</th>' +
+                    '<th>所有ユーザーID</th>' +
+                    '<th>公開設定</th>' +
+                    '<th>作成日時</th>' +
+                    '<th>内部名 (safeName)</th>' +
+                    '<th>操作</th>' +
+                    '</tr></thead><tbody>';
+                
+                snapshots.forEach(snap => {
+                    const visibility = snap.isPublic ? '<span class="text-green-400">公開</span>' : '<span class="text-gray-400">非公開</span>';
+                    const displayName = snap.displayName || '(名前なし)';
+                    const safeName = snap.name || '(不明)';
+                    const ownerID = snap.ownerUserID || '(不明)';
+                    const ownerName = snap.ownerUsername || '(不明)';
+                    
+                    tableHTML += `
+                        <tr>
+                            <td>${displayName}</td>
+                            <td>${ownerName}</td>
+                            <td class="text-xs font-mono">${ownerID}</td>
+                            <td>${visibility}</td>
+                            <td>${new Date(snap.lastModified).toLocaleString()}</td>
+                            <td class="text-xs font-mono">${safeName}</td>
+                            <td>
+                                <button class="btn btn-red" onclick="forceDeleteSnapshot('${safeName}', '${ownerID}', '${displayName}')">完全削除</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tableHTML += '</tbody></table>';
+                snapshotsListDiv.innerHTML = tableHTML;
+            } catch (error) {
+                snapshotsListDiv.innerHTML = `<p class="text-red-400">エラー: ${error.message}</p>`;
+            }
+        }
+
+        // 環境の強制停止
+        async function forceStop(userId) {
+            if (!confirm(`ユーザーID: ${userId} の環境を強制的に一時停止しますか？`)) return;
+            try {
+                const result = await adminApiCall('stop-experiment', 'POST', { userId: userId });
+                alert(`成功: ${result.message}`);
+                loadAllAdminData();
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        // 環境の強制削除
+        async function forceDelete(userId) {
+            if (!confirm(`本当にユーザーID: ${userId} の環境とデータを完全に削除しますか？\n（このユーザーの非公開スナップショットも全て削除されます）`)) return;
+            try {
+                const result = await adminApiCall('delete-experiment', 'DELETE', { userId: userId });
+                alert(`成功: ${result.message}`);
+                loadAllAdminData();
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        // スナップショットの強制削除
+        async function forceDeleteSnapshot(safeName, ownerUserID, displayName) {
+            if (!confirm(`本当にスナップショット「${displayName}」(safeName: ${safeName}) をDBとMinIOから完全に削除しますか？\nこの操作は元に戻せません。`)) return;
+            try {
+                const result = await adminApiCall('snapshots/delete', 'DELETE', { 
+                    safeName: safeName,
+                    ownerUserID: ownerUserID
+                });
+                alert(`成功: ${result.message}`);
+                loadAllAdminData();
+            } catch (error) {
+                alert(`エラー: ${error.message}`);
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>

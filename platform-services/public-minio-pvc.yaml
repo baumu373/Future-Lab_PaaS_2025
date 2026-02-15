@@ -1,0 +1,12 @@
+# 共有MinIOサーバーのデータを永続的に保管するためのディスク領域を要求します。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: public-minio-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: "20Gi" # 共有スペースなので、少し大きめに確保します。
+

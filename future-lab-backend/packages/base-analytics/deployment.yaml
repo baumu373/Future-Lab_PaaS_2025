@@ -1,0 +1,44 @@
+# future-lab-backend/packages/base-analytics/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-deployment-placeholder
+  labels:
+    user-id: user-id-placeholder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab-app-placeholder
+      user-id: user-id-placeholder
+  template:
+    metadata:
+      labels:
+        app: lab-app-placeholder
+        user-id: user-id-placeholder
+    spec:
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: lab-pvc-placeholder
+      containers:
+      # ここを修正します！
+      - name: analysis-container
+        image: baumu373/future-lab-image:1.0 # ★ Docker Hubのイメージを指定
+        command: ["sleep", "infinity"]
+
+      - name: postgres-container
+        image: postgres:14-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "mysecretpassword"
+        - name: POSTGRES_USER
+          value: "user"
+        - name: POSTGRES_DB
+          value: "testdb"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data

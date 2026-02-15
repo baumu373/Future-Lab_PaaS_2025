@@ -1,0 +1,41 @@
+services:
+  keycloak-db:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: password # 本番ではもっと複雑なパスワードにしてください
+    networks:
+      - keycloak-net
+    # [新規] ホストOSの main.go から接続できるよう、ポートを公開
+    ports:
+      - "127.0.0.1:5433:5432" # ホストの5433番をコンテナの5432番にマッピング
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.1
+    container_name: keycloak
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    depends_on:
+      - keycloak-db
+    networks:
+      - keycloak-net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  keycloak-net:
+    driver: bridge
